@@ -114,7 +114,7 @@ export class VideoController {
         return;
       }
 
-      // Upload video file
+      // Upload video file and start processing
       await videoService.uploadVideoFile(
         videoId,
         file.path,
@@ -122,10 +122,87 @@ export class VideoController {
         file.size
       );
 
-      const response: ApiResponse = { success: true, message: 'Video uploaded successfully' };
+      const response: ApiResponse = { 
+        success: true, 
+        message: 'Video uploaded successfully and processing started',
+        data: {
+          videoId,
+          status: 'processing',
+          message: 'Video is being transcoded into multiple quality levels for adaptive streaming'
+        }
+      };
       res.json(response);
     } catch (error) {
       const response: ApiResponse = { success: false, error: error instanceof Error ? error.message : 'Video upload failed' };
+      res.status(400).json(response);
+    }
+  }
+
+  async uploadVideoWithTranscoding(req: Request, res: Response): Promise<void> {
+    try {
+      if (!req.user) {
+        const response: ApiResponse = { success: false, error: 'User not authenticated' };
+        res.status(401).json(response);
+        return;
+      }
+
+      const file = req.file;
+      const { title, description, categoryId, tags, visibility } = req.body;
+
+      if (!file) {
+        const response: ApiResponse = { success: false, error: 'No video file provided' };
+        res.status(400).json(response);
+        return;
+      }
+
+      // Validate video file
+      const isValid = await videoProcessingService.validateVideoFile(file.path);
+      if (!isValid) {
+        await fs.unlink(file.path);
+        const response: ApiResponse = {
+          success: false,
+          error: 'Invalid video file',
+        };
+        res.status(400).json(response);
+        return;
+      }
+
+      // Create video record
+      const video = await videoService.createVideo(req.user.id, {
+        title: title || file.originalname,
+        description,
+        categoryId,
+        tags: tags ? tags.split(',').map((tag: string) => tag.trim()) : [],
+        visibility: visibility || 'public',
+      });
+
+      // Upload and start processing
+      await videoService.uploadVideoFile(
+        video.id,
+        file.path,
+        file.originalname,
+        file.size
+      );
+
+      const response: ApiResponse = {
+        success: true,
+        message: 'Video uploaded successfully and adaptive transcoding started',
+        data: {
+          video,
+          processingStatus: {
+            status: 'processing',
+            progress: 10,
+            message: 'Video is being transcoded into multiple quality levels (240p, 360p, 480p, 720p, 1080p) for adaptive bitrate streaming'
+          }
+        }
+      };
+
+      res.status(201).json(response);
+    } catch (error) {
+      const response: ApiResponse = { 
+        success: false, 
+        error: error instanceof Error ? error.message : 'Video upload and transcoding failed' 
+      };
       res.status(400).json(response);
     }
   }

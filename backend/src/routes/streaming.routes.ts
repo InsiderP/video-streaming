@@ -6,7 +6,7 @@ import { validateRequest, validateParams, schemas } from '../middleware/validati
 
 const router = Router();
 
-// Public streaming routes
+// HLS Adaptive Bitrate Streaming Routes
 router.get('/:videoId/manifest.m3u8',
   validateParams(Joi.object({ videoId: Joi.string().uuid().required() })),
   streamingController.getHLSManifest
@@ -17,7 +17,7 @@ router.get('/:videoId/:quality/playlist.m3u8',
     videoId: Joi.string().uuid().required(),
     quality: Joi.string().valid('240p', '360p', '480p', '720p', '1080p').required()
   })),
-  streamingController.getQualityPlaylist
+  streamingController.getHLSPlaylist
 );
 
 router.get('/:videoId/:quality/:segment.ts',
@@ -29,29 +29,32 @@ router.get('/:videoId/:quality/:segment.ts',
   streamingController.getVideoSegment
 );
 
-router.get('/:videoId/optimal-quality',
+// Processing Status Routes
+router.get('/:videoId/status',
   validateParams(Joi.object({ videoId: Joi.string().uuid().required() })),
-  streamingController.getOptimalQuality
+  streamingController.getProcessingStatus
 );
 
-// Analytics routes (protected)
-router.post('/:videoId/analytics',
+router.get('/:videoId/aws-job-status',
+  validateParams(Joi.object({ videoId: Joi.string().uuid().required() })),
+  streamingController.checkAWSJobStatus
+);
+
+// Analytics and Tracking Routes
+router.post('/:videoId/track',
+  validateParams(Joi.object({ videoId: Joi.string().uuid().required() })),
+  streamingController.trackStreamingEvent
+);
+
+router.get('/:videoId/analytics',
   optionalAuth,
   validateParams(Joi.object({ videoId: Joi.string().uuid().required() })),
-  validateRequest(schemas.streamingAnalytics),
-  streamingController.trackAnalytics
+  streamingController.getStreamingAnalytics
 );
 
-router.get('/:videoId/analytics/realtime',
-  authenticateToken,
-  validateParams(Joi.object({ videoId: Joi.string().uuid().required() })),
-  streamingController.getRealTimeAnalytics
-);
-
-router.get('/:videoId/analytics/stats',
-  authenticateToken,
-  validateParams(Joi.object({ videoId: Joi.string().uuid().required() })),
-  streamingController.getStreamingStats
-);
+// Demo streaming routes (for showcase)
+router.get('/demo/manifest.m3u8', streamingController.getHLSManifest);
+router.get('/demo/:quality/playlist.m3u8', streamingController.getHLSPlaylist);
+router.get('/demo/:quality/:segment.ts', streamingController.getVideoSegment);
 
 export default router;

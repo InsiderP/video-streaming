@@ -9,6 +9,7 @@ A professional video streaming platform with adaptive bitrate streaming capabili
 - **User Management**: Authentication, authorization, and user profiles
 - **Content Management**: Video metadata, categorization, and search
 - **Analytics**: Viewing statistics and performance metrics
+- **Streaming Showcase**: Interactive demo of adaptive bitrate streaming with network simulation
 - **Responsive Design**: Cross-platform compatibility
 
 ## Technology Stack

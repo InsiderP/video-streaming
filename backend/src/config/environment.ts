@@ -38,6 +38,15 @@ export const config = {
     minioUseSSL: process.env.MINIO_USE_SSL === 'true',
   },
   
+  aws: {
+    region: process.env.AWS_REGION || 'us-east-1',
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+    mediaConvertEndpoint: process.env.AWS_MEDIACONVERT_ENDPOINT,
+    s3Bucket: process.env.AWS_S3_BUCKET,
+    cloudFrontDomain: process.env.AWS_CLOUDFRONT_DOMAIN,
+  },
+  
   jwt: {
     secret: process.env.JWT_SECRET || 'your-secret-key',
     expiresIn: process.env.JWT_EXPIRES_IN || '24h',

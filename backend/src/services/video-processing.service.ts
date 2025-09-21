@@ -6,6 +6,8 @@ import { db } from '../config/database';
 import { config } from '../config/environment';
 import { VideoQuality } from '../types/common.types';
 import { uploadDirectoryToS3, getS3PublicUrl } from '../utils/storage';
+import { awsMediaConvertService } from './aws-mediaconvert.service';
+import { cacheService } from './cache.service';
 
 export class VideoProcessingService {
   private readonly qualities: VideoQuality[] = config.video.qualities;
@@ -16,6 +18,7 @@ export class VideoProcessingService {
 
       // Update status to processing
       await this.updateVideoStatus(videoId, 'processing');
+      await cacheService.cacheProcessingStatus(videoId, { status: 'processing', progress: 10 });
 
       // Get video metadata
       const metadata = await this.getVideoMetadata(inputPath);
@@ -23,42 +26,97 @@ export class VideoProcessingService {
       // Update video with metadata
       await this.updateVideoMetadata(videoId, metadata);
 
-      // Create output directory
-      const outputDir = path.join(config.storage.localPath, 'processed', videoId);
-      await fs.mkdir(outputDir, { recursive: true });
-
-      // Generate thumbnail
-      await this.generateThumbnail(inputPath, outputDir, videoId);
-
-      // Transcode to multiple qualities
-      const variants = await this.transcodeToMultipleQualities(inputPath, outputDir, videoId);
-
-      // Generate HLS playlists
-      await this.generateHLSPlaylists(variants, outputDir, videoId);
-
-      // If S3 storage is selected, publish the processed directory to S3
-      if (config.storage.type === 's3') {
-        const prefix = `videos/${videoId}`;
-        await uploadDirectoryToS3({ prefix, directoryPath: outputDir, acl: 'public-read' });
-
-        // Update variant URLs to S3
-        for (const variant of variants) {
-          const playlistKey = `videos/${videoId}/${variant.quality}.m3u8`;
-          const playlistUrl = getS3PublicUrl({ bucket: config.storage.s3Bucket as string, key: playlistKey });
-          await db('video_variants').where({ id: variant.id }).update({ hls_playlist_url: playlistUrl });
-        }
-
-        // Optionally remove local processed files here if needed
+      // Choose processing method based on configuration
+      if (config.aws.accessKeyId && config.aws.secretAccessKey) {
+        // Use AWS MediaConvert for cloud processing
+        await this.processWithAWSMediaConvert(videoId, inputPath, metadata);
+      } else {
+        // Use local FFmpeg processing
+        await this.processWithFFmpeg(videoId, inputPath, metadata);
       }
 
       // Update video status to ready
       await this.updateVideoStatus(videoId, 'ready');
+      await cacheService.cacheProcessingStatus(videoId, { status: 'ready', progress: 100 });
+
+      // Invalidate cache to ensure fresh data
+      await cacheService.invalidateVideoCache(videoId);
 
       console.log(`Video processing completed for video ${videoId}`);
     } catch (error) {
       console.error(`Video processing failed for video ${videoId}:`, error);
       await this.updateVideoStatus(videoId, 'failed');
+      await cacheService.cacheProcessingStatus(videoId, { status: 'failed', progress: 0, error: error instanceof Error ? error.message : 'Unknown error' });
       throw error;
+    }
+  }
+
+  private async processWithAWSMediaConvert(videoId: string, inputPath: string, metadata: any): Promise<void> {
+    console.log(`Processing video ${videoId} with AWS MediaConvert`);
+
+    // Upload source video to S3
+    const inputKey = `videos/${videoId}/source/${path.basename(inputPath)}`;
+    const inputS3Uri = await awsMediaConvertService.uploadToS3(inputPath, inputKey);
+    
+    // Create transcoding job
+    const jobSettings = {
+      videoId,
+      inputS3Uri,
+      outputS3Uri: `s3://${config.aws.s3Bucket}/videos/${videoId}/outputs`,
+      qualities: this.qualities,
+    };
+
+    const jobId = await awsMediaConvertService.createTranscodingJob(jobSettings);
+    
+    // Store job ID in database for status tracking
+    await db('videos')
+      .where({ id: videoId })
+      .update({ 
+        processing_job_id: jobId,
+        updated_at: new Date() 
+      });
+
+    // Generate thumbnail locally (AWS MediaConvert can do this too, but keeping it simple)
+    const outputDir = path.join(config.storage.localPath, 'processed', videoId);
+    await fs.mkdir(outputDir, { recursive: true });
+    await this.generateThumbnail(inputPath, outputDir, videoId);
+
+    // Update progress
+    await cacheService.cacheProcessingStatus(videoId, { 
+      status: 'processing', 
+      progress: 30, 
+      jobId,
+      message: 'Transcoding job created, processing in progress...' 
+    });
+  }
+
+  private async processWithFFmpeg(videoId: string, inputPath: string, metadata: any): Promise<void> {
+    console.log(`Processing video ${videoId} with local FFmpeg`);
+
+    // Create output directory
+    const outputDir = path.join(config.storage.localPath, 'processed', videoId);
+    await fs.mkdir(outputDir, { recursive: true });
+
+    // Generate thumbnail
+    await this.generateThumbnail(inputPath, outputDir, videoId);
+
+    // Transcode to multiple qualities
+    const variants = await this.transcodeToMultipleQualities(inputPath, outputDir, videoId);
+
+    // Generate HLS playlists
+    await this.generateHLSPlaylists(variants, outputDir, videoId);
+
+    // If S3 storage is selected, publish the processed directory to S3
+    if (config.storage.type === 's3') {
+      const prefix = `videos/${videoId}`;
+      await uploadDirectoryToS3({ prefix, directoryPath: outputDir, acl: 'public-read' });
+
+      // Update variant URLs to S3
+      for (const variant of variants) {
+        const playlistKey = `videos/${videoId}/${variant.quality}.m3u8`;
+        const playlistUrl = getS3PublicUrl({ bucket: config.storage.s3Bucket as string, key: playlistKey });
+        await db('video_variants').where({ id: variant.id }).update({ hls_playlist_url: playlistUrl });
+      }
     }
   }
 
@@ -298,6 +356,82 @@ export class VideoProcessingService {
       console.error('Video validation failed:', error);
       return false;
     }
+  }
+
+  async checkAWSJobStatus(videoId: string): Promise<any> {
+    try {
+      const video = await db('videos')
+        .where({ id: videoId })
+        .first();
+
+      if (!video || !video.processing_job_id) {
+        throw new Error('No processing job found for this video');
+      }
+
+      const jobStatus = await awsMediaConvertService.getJobStatus(video.processing_job_id);
+      
+      // Update cache with current status
+      await cacheService.cacheProcessingStatus(videoId, {
+        status: jobStatus.status,
+        progress: jobStatus.progress,
+        jobId: video.processing_job_id,
+        error: jobStatus.errorMessage,
+      });
+
+      // If job is complete, update video variants in database
+      if (jobStatus.status === 'COMPLETE') {
+        await this.updateVideoVariantsFromAWS(videoId, jobStatus);
+        await this.updateVideoStatus(videoId, 'ready');
+        await cacheService.invalidateVideoCache(videoId);
+      } else if (jobStatus.status === 'ERROR') {
+        await this.updateVideoStatus(videoId, 'failed');
+      }
+
+      return jobStatus;
+    } catch (error) {
+      console.error('Failed to check AWS job status:', error);
+      throw error;
+    }
+  }
+
+  private async updateVideoVariantsFromAWS(videoId: string, jobStatus: any): Promise<void> {
+    if (!jobStatus.outputGroupDetails) return;
+
+    for (const outputGroup of jobStatus.outputGroupDetails) {
+      if (outputGroup.OutputDetails) {
+        for (const output of outputGroup.OutputDetails) {
+          if (output.OutputFilePaths && output.OutputFilePaths.length > 0) {
+            const outputPath = output.OutputFilePaths[0];
+            const quality = this.extractQualityFromPath(outputPath);
+            
+            if (quality) {
+              // Create video variant record
+              await db('video_variants').insert({
+                video_id: videoId,
+                quality: quality.name,
+                bitrate: quality.bitrate,
+                resolution_width: quality.width,
+                resolution_height: quality.height,
+                file_path: outputPath,
+                hls_playlist_url: awsMediaConvertService.getCloudFrontUrl(`videos/${videoId}/outputs/${quality.name}.m3u8`),
+                created_at: new Date(),
+              });
+            }
+          }
+        }
+      }
+    }
+  }
+
+  private extractQualityFromPath(outputPath: string): VideoQuality | null {
+    // Extract quality from AWS output path
+    // Example: s3://bucket/videos/123/outputs/720p.m3u8
+    const match = outputPath.match(/(\d+p)\.m3u8$/);
+    if (match) {
+      const qualityName = match[1];
+      return this.qualities.find(q => q.name === qualityName) || null;
+    }
+    return null;
   }
 }
 

@@ -37,6 +37,13 @@ router.post('/:id/upload',
   videoController.uploadVideo
 );
 
+// New endpoint for direct upload with transcoding
+router.post('/upload-with-transcoding',
+  authenticateToken,
+  videoController.uploadMiddleware,
+  videoController.uploadVideoWithTranscoding
+);
+
 router.put('/:id',
   authenticateToken,
   validateParams(schemas.uuid),

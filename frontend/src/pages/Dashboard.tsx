@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useVideoStore } from '../store/video.store';
 import { useAuthStore } from '../store/auth.store';
-import { Eye, UploadCloud, Play, PlusCircle, RefreshCcw } from 'lucide-react';
+import { Eye, UploadCloud, Play, PlusCircle, RefreshCcw, Settings, BarChart3, Clock } from 'lucide-react';
 import LoadingSpinner from '../components/common/LoadingSpinner';
 
 const Dashboard: React.FC = () => {
@@ -34,6 +34,9 @@ const Dashboard: React.FC = () => {
         <div className="flex items-center justify-between mb-6">
           <h1 className="text-3xl font-bold text-foreground">My Dashboard</h1>
           <div className="flex items-center gap-3">
+            <Link to="/streaming-demo" className="btn btn-outline btn-sm">
+              <Play className="w-4 h-4 mr-2" /> Streaming Demo
+            </Link>
             <button onClick={onRefresh} className="btn btn-outline btn-sm" disabled={refreshing}>
               <RefreshCcw className="w-4 h-4 mr-2" /> {refreshing ? 'Refreshing...' : 'Refresh'}
             </button>
@@ -64,12 +67,27 @@ const Dashboard: React.FC = () => {
                 <div className="card-content">
                   <h3 className="font-semibold text-foreground mb-1">{v.title}</h3>
                   <p className="text-sm text-muted-foreground mb-3 line-clamp-2">{v.description}</p>
-                  <div className="flex items-center justify-between text-sm text-muted-foreground">
-                    <span className="flex items-center gap-1"><Eye className="w-4 h-4" /> {v.viewCount}</span>
-                    <div className="flex items-center gap-2">
-                      <Link to={`/video/${v.id}`} className="btn btn-sm btn-outline"><Play className="w-4 h-4 mr-1" /> View</Link>
-                      <Link to={`/analytics/${v.id}`} className="btn btn-sm btn-outline">Analytics</Link>
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between text-sm text-muted-foreground">
+                      <span className="flex items-center gap-1"><Eye className="w-4 h-4" /> {v.viewCount}</span>
+                      <span className="flex items-center gap-1">
+                        <Clock className="w-4 h-4" />
+                        {v.duration ? `${Math.floor(v.duration / 60)}:${(v.duration % 60).toString().padStart(2, '0')}` : 'N/A'}
+                      </span>
                     </div>
+                    <div className="flex items-center gap-2">
+                      <Link to={`/video/${v.id}`} className="btn btn-sm btn-outline flex-1">
+                        <Play className="w-4 h-4 mr-1" /> View
+                      </Link>
+                      <Link to={`/analytics/${v.id}`} className="btn btn-sm btn-outline">
+                        <BarChart3 className="w-4 h-4" />
+                      </Link>
+                    </div>
+                    {v.status === 'ready' && (
+                      <div className="text-xs text-green-600 bg-green-50 px-2 py-1 rounded">
+                        ✓ Adaptive streaming ready
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>

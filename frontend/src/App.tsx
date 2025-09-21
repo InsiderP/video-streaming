@@ -12,6 +12,8 @@ import VideoPlayer from './pages/VideoPlayer';
 import VideoUpload from './pages/VideoUpload';
 import Profile from './pages/Profile';
 import Analytics from './pages/Analytics';
+import StreamingShowcase from './pages/StreamingShowcase';
+import AdaptiveStreamingDemo from './pages/AdaptiveStreamingDemo';
 
 // Components
 import Layout from './components/layout/Layout';
@@ -68,6 +70,8 @@ function App() {
             <Route path="/" element={<Layout />}>
               <Route index element={<Home />} />
               <Route path="video/:id" element={<VideoPlayer />} />
+              <Route path="streaming-demo" element={<StreamingShowcase />} />
+              <Route path="adaptive-streaming" element={<AdaptiveStreamingDemo />} />
               
               {/* Auth required routes */}
               <Route path="dashboard" element={

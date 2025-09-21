@@ -18,6 +18,7 @@ import {
 } from '../types/video.types';
 import { VideoStatus, VideoQuality, PaginationMeta } from '../types/common.types';
 import { VideoProcessingService } from './video-processing.service';
+import { cacheService } from './cache.service';
 
 export class VideoService {
   private processingService = new VideoProcessingService();
@@ -82,6 +83,16 @@ export class VideoService {
   }
 
   async getVideoById(videoId: string, userId?: string): Promise<Video | null> {
+    // Try to get from cache first
+    const cachedVideo = await cacheService.getCachedVideoMetadata(videoId);
+    if (cachedVideo) {
+      // Check visibility
+      if (cachedVideo.visibility === 'private' && cachedVideo.userId !== userId) {
+        throw new Error('Video is private');
+      }
+      return cachedVideo;
+    }
+
     const video = await db('videos')
       .select(
         'videos.*',
@@ -106,7 +117,7 @@ export class VideoService {
     // Get variants
     const variants = await this.getVideoVariants(videoId);
 
-    return {
+    const mappedVideo = {
       ...this.mapVideoFromDb(video),
       user: {
         id: video.user_id,
@@ -119,6 +130,11 @@ export class VideoService {
       } : undefined,
       variants,
     };
+
+    // Cache the result
+    await cacheService.cacheVideoMetadata(videoId, mappedVideo);
+
+    return mappedVideo;
   }
 
   async getVideos(query: VideoListQuery): Promise<{ videos: Video[]; pagination: PaginationMeta }> {
@@ -136,7 +152,8 @@ export class VideoService {
 
     const offset = (page - 1) * limit;
 
-    let queryBuilder = db('videos')
+    // Results query
+    let resultsQuery = db('videos')
       .select(
         'videos.*',
         'users.username',
@@ -148,32 +165,26 @@ export class VideoService {
       .where('videos.status', status)
       .where('videos.visibility', visibility);
 
-    // Apply filters
+    // Apply filters (shared)
     if (category) {
-      queryBuilder = queryBuilder.where('videos.category_id', category);
+      resultsQuery = resultsQuery.where('videos.category_id', category);
     }
 
     if (userId) {
-      queryBuilder = queryBuilder.where('videos.user_id', userId);
+      resultsQuery = resultsQuery.where('videos.user_id', userId);
     }
 
     if (search) {
-      queryBuilder = queryBuilder.whereRaw(
+      resultsQuery = resultsQuery.whereRaw(
         "to_tsvector('english', videos.title || ' ' || COALESCE(videos.description, '')) @@ plainto_tsquery('english', ?)",
         [search]
       );
     }
 
-    // Apply sorting
-    queryBuilder = queryBuilder.orderBy(`videos.${sortBy}`, sortOrder);
+    // Sorting & pagination
+    resultsQuery = resultsQuery.orderBy(`videos.${sortBy}`, sortOrder).limit(limit).offset(offset);
 
-    // Get total count
-    const totalQuery = queryBuilder.clone().count('* as count').first();
-    const totalResult = await totalQuery;
-    const total = totalResult?.count || 0;
-
-    // Get paginated results
-    const videos = await queryBuilder.limit(limit).offset(offset);
+    const videos = await resultsQuery;
 
     const mappedVideos = videos.map(video => ({
       ...this.mapVideoFromDb(video),
@@ -188,12 +199,37 @@ export class VideoService {
       } : undefined,
     }));
 
+    // Separate count query with identical filters, using countDistinct on videos.id
+    let countQuery = db('videos')
+      .leftJoin('users', 'videos.user_id', 'users.id')
+      .leftJoin('categories', 'videos.category_id', 'categories.id')
+      .where('videos.status', status)
+      .where('videos.visibility', visibility);
+
+    if (category) {
+      countQuery = countQuery.where('videos.category_id', category);
+    }
+
+    if (userId) {
+      countQuery = countQuery.where('videos.user_id', userId);
+    }
+
+    if (search) {
+      countQuery = countQuery.whereRaw(
+        "to_tsvector('english', videos.title || ' ' || COALESCE(videos.description, '')) @@ plainto_tsquery('english', ?)",
+        [search]
+      );
+    }
+
+    const totalRow = await countQuery.countDistinct({ count: 'videos.id' }).first();
+    const totalNum = parseInt((totalRow?.count as unknown as string) || '0', 10);
+
     const pagination: PaginationMeta = {
       page,
       limit,
-      total: parseInt(total as string),
-      totalPages: Math.ceil(parseInt(total as string) / limit),
-      hasNext: page < Math.ceil(parseInt(total as string) / limit),
+      total: totalNum,
+      totalPages: Math.max(1, Math.ceil(totalNum / limit)),
+      hasNext: page < Math.ceil(totalNum / limit),
       hasPrev: page > 1,
     };
 
@@ -236,11 +272,17 @@ export class VideoService {
   }
 
   async getVideoVariants(videoId: string): Promise<VideoVariant[]> {
+    // Try to get from cache first
+    const cachedVariants = await cacheService.getCachedVideoVariants(videoId);
+    if (cachedVariants) {
+      return cachedVariants;
+    }
+
     const variants = await db('video_variants')
       .where({ video_id: videoId })
       .orderBy('bitrate', 'desc');
 
-    return variants.map(variant => ({
+    const mappedVariants = variants.map(variant => ({
       id: variant.id,
       videoId: variant.video_id,
       quality: variant.quality,
@@ -253,9 +295,20 @@ export class VideoService {
       dashManifestUrl: variant.dash_manifest_url,
       createdAt: variant.created_at,
     }));
+
+    // Cache the result
+    await cacheService.cacheVideoVariants(videoId, mappedVariants);
+
+    return mappedVariants;
   }
 
   async generateHLSManifest(videoId: string): Promise<HLSManifest> {
+    // Try to get from cache first
+    const cachedManifest = await cacheService.getCachedHLSManifest(videoId);
+    if (cachedManifest) {
+      return cachedManifest;
+    }
+
     const variants = await this.getVideoVariants(videoId);
 
     if (variants.length === 0) {
@@ -271,13 +324,23 @@ export class VideoService {
       })),
     };
 
+    // Cache the manifest
+    await cacheService.cacheHLSManifest(videoId, manifest);
+
     return manifest;
   }
 
   async incrementViewCount(videoId: string): Promise<void> {
+    // Increment in database
     await db('videos')
       .where({ id: videoId })
       .increment('view_count', 1);
+
+    // Increment in cache for real-time updates
+    await cacheService.incrementViewCount(videoId);
+
+    // Invalidate cached video metadata
+    await cacheService.invalidateVideoMetadata(videoId);
   }
 
   async addComment(videoId: string, userId: string, commentData: CreateCommentRequest): Promise<VideoComment> {

@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Search, Upload, User, LogOut, Menu, X } from 'lucide-react';
+import { Search, Upload, User, LogOut, Menu, X, Play } from 'lucide-react';
 import { useAuthStore } from '../../store/auth.store';
 import { useState } from 'react';
 
@@ -54,6 +54,22 @@ const Header: React.FC = () => {
 
           {/* Navigation */}
           <nav className="hidden md:flex items-center space-x-6">
+            <Link
+              to="/streaming-demo"
+              className="flex items-center space-x-2 text-foreground hover:text-primary transition-colors"
+            >
+              <Play className="w-4 h-4" />
+              <span>Streaming Demo</span>
+            </Link>
+            
+            <Link
+              to="/adaptive-streaming"
+              className="flex items-center space-x-2 text-foreground hover:text-primary transition-colors"
+            >
+              <Play className="w-4 h-4" />
+              <span>Adaptive Streaming</span>
+            </Link>
+            
             {isAuthenticated ? (
               <>
                 {user?.role === 'creator' || user?.role === 'admin' ? (
@@ -145,6 +161,24 @@ const Header: React.FC = () => {
 
             {/* Mobile Navigation */}
             <nav className="space-y-2">
+              <Link
+                to="/streaming-demo"
+                className="flex items-center space-x-2 text-foreground hover:text-primary transition-colors py-2"
+                onClick={() => setIsMenuOpen(false)}
+              >
+                <Play className="w-4 h-4" />
+                <span>Streaming Demo</span>
+              </Link>
+              
+              <Link
+                to="/adaptive-streaming"
+                className="flex items-center space-x-2 text-foreground hover:text-primary transition-colors py-2"
+                onClick={() => setIsMenuOpen(false)}
+              >
+                <Play className="w-4 h-4" />
+                <span>Adaptive Streaming</span>
+              </Link>
+              
               {isAuthenticated ? (
                 <>
                   {user?.role === 'creator' || user?.role === 'admin' ? (

@@ -69,15 +69,9 @@ export const useAuthStore = create<AuthStore>()(
         set({ isLoading: true, error: null });
         
         try {
-          const response = await apiService.register(data);
-          const { user } = response.data.data!;
-          
-          set({
-            user,
-            isAuthenticated: true,
-            isLoading: false,
-            error: null,
-          });
+          await apiService.register(data);
+          // Do NOT mark authenticated here; register endpoint does not issue tokens.
+          set({ isLoading: false, error: null });
         } catch (error: any) {
           set({
             isLoading: false,
@@ -93,18 +87,11 @@ export const useAuthStore = create<AuthStore>()(
         try {
           await apiService.logout();
         } catch (error) {
-          console.error('Logout error:', error);
+          // ignore
         } finally {
-          // Clear tokens and state
           localStorage.removeItem('accessToken');
           localStorage.removeItem('refreshToken');
-          
-          set({
-            user: null,
-            isAuthenticated: false,
-            isLoading: false,
-            error: null,
-          });
+          set({ user: null, isAuthenticated: false, isLoading: false, error: null });
         }
       },
 
@@ -118,26 +105,14 @@ export const useAuthStore = create<AuthStore>()(
           const response = await apiService.refreshToken({ refreshToken });
           const { user, accessToken, refreshToken: newRefreshToken } = response.data.data!;
           
-          // Update tokens
           localStorage.setItem('accessToken', accessToken);
           localStorage.setItem('refreshToken', newRefreshToken);
           
-          set({
-            user,
-            isAuthenticated: true,
-            error: null,
-          });
+          set({ user, isAuthenticated: true, error: null });
         } catch (error) {
-          // Refresh failed, logout user
           localStorage.removeItem('accessToken');
           localStorage.removeItem('refreshToken');
-          
-          set({
-            user: null,
-            isAuthenticated: false,
-            error: 'Session expired',
-          });
-          
+          set({ user: null, isAuthenticated: false, error: 'Session expired' });
           throw error;
         }
       },
@@ -148,17 +123,9 @@ export const useAuthStore = create<AuthStore>()(
         try {
           const response = await apiService.updateProfile(data);
           const { user } = response.data.data!;
-          
-          set({
-            user,
-            isLoading: false,
-            error: null,
-          });
+          set({ user, isLoading: false, error: null });
         } catch (error: any) {
-          set({
-            isLoading: false,
-            error: error.response?.data?.error || 'Profile update failed',
-          });
+          set({ isLoading: false, error: error.response?.data?.error || 'Profile update failed' });
           throw error;
         }
       },
@@ -168,60 +135,34 @@ export const useAuthStore = create<AuthStore>()(
         
         try {
           await apiService.changePassword({ currentPassword, newPassword });
-          
-          set({
-            isLoading: false,
-            error: null,
-          });
+          set({ isLoading: false, error: null });
         } catch (error: any) {
-          set({
-            isLoading: false,
-            error: error.response?.data?.error || 'Password change failed',
-          });
+          set({ isLoading: false, error: error.response?.data?.error || 'Password change failed' });
           throw error;
         }
       },
 
-      clearError: () => {
-        set({ error: null });
-      },
-
-      setLoading: (loading: boolean) => {
-        set({ isLoading: loading });
-      },
+      clearError: () => set({ error: null }),
+      setLoading: (loading: boolean) => set({ isLoading: loading }),
     }),
     {
       name: 'auth-storage',
-      partialize: (state) => ({
-        user: state.user,
-        isAuthenticated: state.isAuthenticated,
-      }),
+      partialize: (state) => ({ user: state.user, isAuthenticated: state.isAuthenticated }),
     }
   )
 );
 
-// Initialize auth state from localStorage on app start
 export const initializeAuth = async () => {
   const token = localStorage.getItem('accessToken');
-  
   if (token) {
     try {
       const response = await apiService.getProfile();
       const { user } = response.data.data!;
-      
-      useAuthStore.setState({
-        user,
-        isAuthenticated: true,
-      });
-    } catch (error) {
-      // Token is invalid, clear it
+      useAuthStore.setState({ user, isAuthenticated: true });
+    } catch {
       localStorage.removeItem('accessToken');
       localStorage.removeItem('refreshToken');
-      
-      useAuthStore.setState({
-        user: null,
-        isAuthenticated: false,
-      });
+      useAuthStore.setState({ user: null, isAuthenticated: false });
     }
   }
 };
