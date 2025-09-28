@@ -562,7 +562,7 @@ const VideoPlayer: React.FC = () => {
               </div>
               <div className="flex justify-between">
                 <span>F</span>
-                <span className="text-gray-300">Fullscreen</span>
+                <span className="text-gray-300">Fullscreens</span>
               </div>
               <div className="flex justify-between">
                 <span>H</span>
