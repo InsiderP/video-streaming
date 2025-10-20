@@ -566,7 +566,7 @@ const VideoPlayer: React.FC = () => {
               </div>
               <div className="flex justify-between">
                 <span>H</span>
-                <span className="text-gray-300">Showsss/Hidenn Helps</span>
+                <span className="text-gray-300">Showss/Hidenn Helps</span>
               </div>
             </div>
           </div>
